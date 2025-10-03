@@ -11,34 +11,40 @@ A clean, structured template for creating analysis microservices that integrate 
 
 ## Architecture
 
-The template follows a 3-step process:
+The template follows a **3-step workflow** orchestrated by a `main()` function:
 
-1. **Preparation** (handled by `app.py`):
-   - Receives input files via API upload
-   - Receives parameters via API
+1. **Step 1: Receive Files** (handled by `main.py`):
+   - Receives all files from orchestrator API
    - Stores files in `inputs/{job_id}/` folder
-   - Stores parameters in `inputs/{job_id}/parameters.json`
+   - Stores parameters in `inputs/{job_id}/parameters.yaml` (YAML format for easy editing)
 
-2. **Execution** (implemented in `run.py`):
+2. **Step 2: Execute Analysis** (implemented in `analysis/run.py`):
    - Data scientist implements analysis logic
-   - Receives input file paths and parameters as arguments
+   - Reads input files and parameters from configured paths
    - Saves results to `outputs/{job_id}/` folder
-   - Can use `processing/{job_id}/` for temporary files
+   - Saves KPIs to `outputs/{job_id}/kpis.yaml`
 
-3. **Returning** (handled by `app.py`):
-   - Collects output files from `outputs/{job_id}/`
-   - Returns results and file list via API
-   - Provides download endpoints for output files
+3. **Step 3: Extract Outputs** (handled by `main.py`):
+   - Collects all output files from `outputs/{job_id}/`
+   - Returns files and KPIs to orchestrator
+   - Provides structured results with metadata
 
 ## How to Use
 
 1. **Copy this folder** for your new analysis service
-2. **Customize `files.py`** with your file definitions
-3. **Customize `parameters.py`** with your parameter definitions
-4. **Implement `analysis/run.py`** with your analysis logic
-5. **Add utility functions** to `analysis/src/utils.py` and other helper files in `analysis/src/`
-6. **Add dependencies** to `requirements.txt`
-7. **Deploy to Railway**
+2. **Configure `analysis/config.py`** with your file paths and settings
+3. **Implement `analysis/run.py`** with your analysis logic
+4. **Add utility functions** to `analysis/src/utils.py` and other helper files in `analysis/src/`
+5. **Add dependencies** to `requirements.txt`
+6. **Deploy to Railway**
+
+### For Data Scientists
+
+**Only 2 files to edit:**
+- `analysis/config.py` - Configure input/output file paths
+- `analysis/run.py` - Implement your analysis logic
+
+See `analysis/README.md` for detailed configuration guide.
 
 ## Quick Start
 
@@ -57,82 +63,82 @@ curl http://localhost:8000/info
 
 ## Customize Your Analysis
 
-### 1. Define Files (`files.py`)
+### 1. Configure Files (`analysis/config/`)
 
+**Input files** (`analysis/config/inputs.py`):
 ```python
-# Input files
-DATA = {
-    "type": "input",
-    "basename": "data",
-    "required": True,
-    "extension": ".csv",
-    "description": "Main data file with delivery information"
-}
-
-CONFIG = {
-    "type": "input",
-    "basename": "config",
-    "required": True,
-    "extension": ".json",
-    "description": "Configuration file with analysis parameters"
-}
-
-# Output files
-RESULTS = {
-    "type": "output",
-    "basename": "results",
-    "required": True,
-    "extension": ".json",
-    "description": "Analysis results and KPIs"
-}
-```
-
-### 2. Define Parameters (`parameters.py`)
-
-```python
-ANALYSIS_TYPE = {
-    "basename": "analysis_type",
-    "type": "string",
-    "enum": ["delivery_time", "route_optimization"],
-    "description": "Type of analysis to perform",
-    "required": True
-}
-
-DATE_RANGE = {
-    "basename": "date_range",
-    "type": "string",
-    "enum": ["last_7_days", "last_30_days"],
-    "description": "Date range for analysis",
-    "required": True
-}
-```
-
-### 3. Implement Analysis Logic (`analysis/run.py`)
-
-```python
-def run_analysis(
-    input_files: Dict[str, str],
-    parameters: Dict[str, Any],
-    output_files: Dict[str, str],
-    processing_files: Dict[str, str],
-    progress_callback=None
-) -> Dict[str, Any]:
-    # Read input data
-    data_file = input_files.get("data.csv")
-    data_df = pd.read_csv(data_file)
-    
-    # Your analysis logic here
-    results = {
-        "total_deliveries": len(data_df),
-        "avg_delivery_time": data_df['delivery_time'].mean(),
-        "success_rate": (data_df['status'] == 'delivered').mean() * 100
+INPUT_FILES = {
+    "file1": {
+        "dtype": "csv",
+        "name": "file1.csv",
+        "description": "First CSV input file",
+        "path": "file1.csv",
+        "required": True
+    },
+    "file2": {
+        "dtype": "csv",
+        "name": "file2.csv",
+        "description": "Second CSV input file", 
+        "path": "file2.csv",
+        "required": True
     }
+}
+```
+
+**Output files** (`analysis/config/outputs.py`):
+```python
+OUTPUT_FILES = {
+    "output1": {
+        "dtype": "xlsx",
+        "name": "output1.xlsx",
+        "description": "First processed file saved as XLSX",
+        "path": "output1.xlsx",
+        "required": True
+    },
+    "output2": {
+        "dtype": "xlsx",
+        "name": "output2.xlsx",
+        "description": "Second processed file saved as XLSX",
+        "path": "output2.xlsx",
+        "required": True
+    }
+}
+```
+
+### 2. Define Parameters (`analysis/config/parameters.py`)
+
+```python
+MULTIPLIER = {
+    "basename": "multiplier",
+    "type": "number",
+    "description": "Number to multiply by 2",
+    "required": True,
+    "default": 1
+}
+```
+
+### 3. Implement Analysis (`analysis/run.py`)
+
+```python
+def run_analysis(input_files, parameters, output_files, processing_files, progress_callback):
+    # Load 2 CSV files
+    df1 = pd.read_csv(input_files["file1"])
+    df2 = pd.read_csv(input_files["file2"])
     
-    # Save results using output file paths
-    results_file = output_files.get("results.json")
-    json.dump(results, open(results_file, 'w'))
+    # Get parameter and calculate result
+    multiplier = parameters.get('multiplier', 1)
+    result = 2 * multiplier
     
-    return results
+    # Save as XLSX files
+    df1.to_excel(output_files["output1"], index=False)
+    df2.to_excel(output_files["output2"], index=False)
+    
+    # Save KPIs
+    kpis = {"multiplier": multiplier, "result": result}
+    with open(output_files["kpis"], 'w') as f:
+        yaml.dump(kpis, f)
+    
+    return {"multiplier": multiplier, "result": result}
 ```
 
 ### 4. Add Utility Functions (`analysis/src/utils.py`)

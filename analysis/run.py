@@ -3,115 +3,94 @@ Main analysis runner - Data scientists implement their analysis logic here.
 
 This is the ONLY file data scientists need to modify.
 All infrastructure complexity is handled automatically.
+
+Data scientists can easily modify:
+- Input file paths in analysis/metadata/inputs.py
+- Output file paths in analysis/metadata/outputs.py
+- Analysis logic in this file
 """
 
 import pandas as pd
 import numpy as np
-import json
+import os
 from pathlib import Path
 from typing import Dict, Any
+from analysis.metadata.inputs import get_input_files
+from analysis.metadata.outputs import get_output_files
+from analysis.metadata.processed import get_processed_files
 
-def run_analysis(
-    input_files: Dict[str, str],
-    parameters: Dict[str, Any],
-    output_files: Dict[str, str],
-    processing_files: Dict[str, str],
-    progress_callback=None
-) -> Dict[str, Any]:
+def run_analysis(job_id: str, progress_callback=None):
     """
-    Main analysis function - IMPLEMENT YOUR ANALYSIS LOGIC HERE.
+    Simple analysis function: Process 2 CSV files and save as XLSX.
     
     Args:
-        input_files: Dictionary mapping filename to file path
-        parameters: Dictionary with analysis parameters
-        output_files: Dictionary mapping output filename to file path
-        processing_files: Dictionary mapping processing filename to file path
+        job_id: Job identifier for file paths
         progress_callback: Optional progress callback function
         
     Returns:
-        Dictionary with analysis results and KPIs
+        Status string indicating completion
     """
     
     if progress_callback:
-        progress_callback(0.1, "Loading data...")
+        progress_callback(0.1, "Loading CSV files...")
+    
+    # Get file paths using metadata functions
+    input_files = get_input_files(job_id)
+    output_files = get_output_files(job_id)
+    processing_files = get_processed_files(job_id)
     
     # ========================================
-    # YOUR ANALYSIS LOGIC STARTS HERE
+    # SIMPLE ANALYSIS LOGIC
     # ========================================
     
-    # Example: Read input data
-    # You can access files by their filename from input_files dict
-    data_file = input_files.get("data.csv")
-    if not data_file:
-        raise ValueError("Required file 'data.csv' not found")
+    # Read the 2 CSV files
+    file1_path = input_files["file1"]["path"]
+    file2_path = input_files["file2"]["path"]
     
-    data_df = pd.read_csv(data_file)
+    if not Path(file1_path).exists():
+        file1_info = input_files["file1"]
+        raise ValueError(f"Required file 'file1' ({file1_info['name']}) not found at {file1_path}")
+    
+    if not Path(file2_path).exists():
+        file2_info = input_files["file2"]
+        raise ValueError(f"Required file 'file2' ({file2_info['name']}) not found at {file2_path}")
+    
+    # Load CSV files using pandas
+    df1 = pd.read_csv(file1_path)
+    df2 = pd.read_csv(file2_path)
+    
+    print(f"File1 shape: {df1.shape}")
+    print(f"File2 shape: {df2.shape}")
     
     if progress_callback:
-        progress_callback(0.5, "Processing data...")
+        progress_callback(0.3, "Processing data...")
     
-    # Example: Simple pandas operations
-    print(f"Data shape: {data_df.shape}")
+    print(f"Processing {len(df1)} rows from file1 and {len(df2)} rows from file2")
     
-    # Example: Get sum of numeric columns (ignoring errors)
-    numeric_sum = data_df.select_dtypes(include=[np.number]).sum(skipna=True)
-    print(f"Numeric columns sum: {numeric_sum}")
-    
-    # Example: Basic analysis
-    total_deliveries = len(data_df)
-    avg_delivery_time = data_df['delivery_time'].mean() if 'delivery_time' in data_df.columns else 0
-    success_rate = (data_df['status'] == 'delivered').mean() * 100 if 'status' in data_df.columns else 0
-    
-    # Generate insights
-    insights = []
-    if avg_delivery_time > 30:
-        insights.append("Average delivery time is above 30 minutes")
-    if success_rate < 95:
-        insights.append("Success rate is below 95%")
+    # Example: Use processed files for temporary data
+    temp_data_file = processing_files["temp_data"]["path"]
+    temp_info = processing_files["temp_data"]
+    print(f"Using temporary file: {temp_info['name']}")
+    # Example: Save intermediate data
+    df1.to_csv(temp_data_file, index=False)
     
     if progress_callback:
-        progress_callback(0.8, "Saving results...")
+        progress_callback(0.7, "Saving as XLSX...")
     
-    # ========================================
-    # YOUR ANALYSIS LOGIC ENDS HERE
-    # ========================================
+    # Save files as XLSX using pandas
+    # Save first file as XLSX
+    output1_file = output_files["output1"]["path"]
+    output1_info = output_files["output1"]
+    print(f"Saving file1 as XLSX to {output1_info['name']}")
+    df1.to_excel(output1_file, index=False)
     
-    # Prepare results
-    results = {
-        "total_deliveries": total_deliveries,
-        "avg_delivery_time": round(avg_delivery_time, 2),
-        "success_rate": round(success_rate, 2),
-        "cost_savings": 0,
-        "efficiency_improvement": 0,
-        "insights": insights,
-        "parameters_used": parameters
-    }
-    
-    # Save results using output file paths
-    # Save results JSON
-    results_file = output_files.get("results.json")
-    with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2)
-    
-    # Save processed data
-    processed_file = output_files.get("processed_data.csv")
-    data_df.to_csv(processed_file, index=False)
-    
-    # Save insights
-    insights_text = "Analysis Results:\n\n"
-    insights_text += f"Total deliveries: {total_deliveries}\n"
-    insights_text += f"Average delivery time: {avg_delivery_time:.2f} minutes\n"
-    insights_text += f"Success rate: {success_rate:.2f}%\n\n"
-    
-    insights_text += "Insights:\n"
-    for insight in insights:
-        insights_text += f"• {insight}\n"
-    
-    insights_file = output_files.get("insights.txt")
-    with open(insights_file, 'w') as f:
-        f.write(insights_text)
+    # Save second file as XLSX
+    output2_file = output_files["output2"]["path"]
+    output2_info = output_files["output2"]
+    print(f"Saving file2 as XLSX to {output2_info['name']}")
+    df2.to_excel(output2_file, index=False)
     
     if progress_callback:
         progress_callback(1.0, "Analysis completed!")
     
-    return results
+    return "completed"

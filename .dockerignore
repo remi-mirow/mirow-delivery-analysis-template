@@ -21,3 +21,8 @@ docs/
 # Ignore temporary files
 *.tmp
 *.temp
+
+# Ignore analysis data files (but keep folder structure)
+analysis/data/inputs/*/
+analysis/data/outputs/*/
+analysis/data/processed/*/

@@ -9,8 +9,9 @@ import os
 from pathlib import Path
 try:
     from analysis.run import run_analysis
-    from files import get_all_input_files, get_all_output_files
-    from parameters import get_all_parameters
+    from analysis.metadata.inputs import get_input_files
+    from analysis.metadata.outputs import get_output_files
+    from main import main as analysis_main
     print("All imports successful")
 except ImportError as e:
     print(f"Import error: {e}")
@@ -62,9 +63,8 @@ async def info():
     return {
         "name": "Analysis Service",
         "version": "1.0.0",
-        "description": "A sample analysis service",
-        "input_files": get_all_input_files(),
-        "input_parameters": get_all_parameters()
+        "description": "A simple analysis service that processes 2 CSV files",
+        "input_files": get_input_files("example")
     }
 
 @app.post("/analyze", response_model=AnalysisResponse)
@@ -164,81 +164,30 @@ async def cancel_job(job_id: str):
 
 async def process_job(job_id: str, files: List[UploadFile], parameters: Dict[str, Any]):
     """
-    Process analysis job - handles file preparation and execution.
+    Process analysis job using the new 3-step workflow.
     
-    This function handles the infrastructure complexity.
-    Data scientists implement their logic in run_analysis()
+    This function now uses the main() orchestrator function.
     """
     job = jobs[job_id]
     
     try:
         job["status"] = "running"
-        job["message"] = "Preparing files..."
+        job["message"] = "Starting analysis workflow..."
         
-        # 1. PREPARATION: Store input files and parameters
-        input_dir = Path("inputs") / job_id
-        output_dir = Path("outputs") / job_id
-        processing_dir = Path("processing") / job_id
+        # Get orchestrator URL from environment
+        orchestrator_url = os.getenv("ORCHESTRATOR_URL", "http://localhost:8001")
         
-        # Create directories
-        input_dir.mkdir(parents=True, exist_ok=True)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        processing_dir.mkdir(parents=True, exist_ok=True)
+        # Use the new main() function for the 3-step workflow
+        result = await analysis_main(orchestrator_url, job_id)
         
-        # Store uploaded files
-        input_files = {}
-        for file in files:
-            file_path = input_dir / file.filename
-            with open(file_path, "wb") as buffer:
-                content = await file.read()
-                buffer.write(content)
-            input_files[file.filename] = str(file_path)
+        # Update job status based on result
+        job["status"] = result["status"]
+        job["message"] = result.get("message", "Analysis completed")
         
-        # Store parameters
-        params_file = input_dir / "parameters.json"
-        with open(params_file, "w") as f:
-            json.dump(parameters, f, indent=2)
-        
-        job["message"] = "Running analysis..."
-        
-        # 2. EXECUTION: Call data scientist's run function
-        def progress_callback(progress: float, message: str):
-            job["progress"] = progress
-            job["message"] = message
-        
-        # Prepare output and processing file paths
-        output_files = {
-            "results.json": str(output_dir / "results.json"),
-            "processed_data.csv": str(output_dir / "processed_data.csv"),
-            "insights.txt": str(output_dir / "insights.txt")
-        }
-        
-        processing_files = {
-            "temp_data.csv": str(processing_dir / "temp_data.csv"),
-            "temp_results.json": str(processing_dir / "temp_results.json")
-        }
-        
-        # Run the analysis with file paths and parameters
-        results = run_analysis(
-            input_files=input_files,
-            parameters=parameters,
-            output_files=output_files,
-            processing_files=processing_files,
-            progress_callback=progress_callback
-        )
-        
-        # 3. RETURNING: Collect output files
-        output_file_list = []
-        if output_dir.exists():
-            for file_path in output_dir.iterdir():
-                if file_path.is_file():
-                    output_file_list.append(file_path.name)
-        
-        # Store results
-        job["results"] = results
-        job["output_files"] = output_file_list
-        job["status"] = "completed"
-        job["message"] = "Analysis completed successfully"
+        if result["status"] == "completed":
+            job["output_files"] = result["output_files"]
+        else:
+            job["error"] = result.get("error", "Unknown error")
         
     except Exception as e:
         job["status"] = "failed"

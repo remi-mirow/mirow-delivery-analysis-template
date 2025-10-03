@@ -4,6 +4,8 @@ Analysis Service - FastAPI web service implementing 3-step workflow:
 1. Receive files from orchestrator API and store in inputs folder
 2. Execute run() in analysis 
 3. Extract outputs and return files
+
+This service automatically registers itself with the orchestrator on startup.
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -15,12 +17,38 @@ import asyncio
 import uvicorn
 import os
 import aiofiles
+import httpx
 from pathlib import Path
+from datetime import datetime
 
 # Analysis imports
 from analysis.run import run_analysis
 from analysis.metadata.inputs import get_input_files, INPUTS_DIR
 from analysis.metadata.outputs import get_output_files, OUTPUTS_DIR
+
+# Environment variables
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
+SERVICE_NAME = os.getenv("SERVICE_NAME", "mirow-delivery-analysis-template")
+SERVICE_VERSION = os.getenv("SERVICE_VERSION", "1.0.0")
+SERVICE_PORT = int(os.getenv("PORT", 8000))
+BASE_URL = os.getenv("BASE_URL", f"http://localhost:{SERVICE_PORT}")
+
+# Service registration data
+SERVICE_INFO = {
+    "service_name": SERVICE_NAME,
+    "service_type": "analysis",
+    "base_url": BASE_URL,
+    "health_endpoint": "/health",
+    "info_endpoint": "/info",
+    "version": SERVICE_VERSION,
+    "description": "A simple analysis service that processes 2 CSV files",
+    "metadata": {
+        "input_files": get_input_files("example"),
+        "capabilities": ["csv_processing", "data_analysis"],
+        "max_file_size": "10MB",
+        "supported_formats": ["csv", "xlsx"]
+    }
+}
 
 # Models
 class AnalysisResponse(BaseModel):
@@ -39,6 +67,54 @@ jobs = {}
 
 app = FastAPI(title="Analysis Service")
 
+# Service registration functions
+async def register_with_orchestrator():
+    """Register this service with the orchestrator"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{ORCHESTRATOR_URL}/api/v1/services/register",
+                json=SERVICE_INFO
+            )
+            if response.status_code == 200:
+                print(f"✅ Successfully registered with orchestrator at {ORCHESTRATOR_URL}")
+                return True
+            else:
+                print(f"⚠️ Failed to register with orchestrator: {response.status_code} - {response.text}")
+                return False
+    except Exception as e:
+        print(f"⚠️ Could not connect to orchestrator at {ORCHESTRATOR_URL}: {str(e)}")
+        return False
+
+async def periodic_health_check():
+    """Periodically update health status with orchestrator"""
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{ORCHESTRATOR_URL}/api/v1/services/{SERVICE_NAME}/health-check"
+                )
+                if response.status_code == 200:
+                    print("✅ Health check sent to orchestrator")
+                else:
+                    print(f"⚠️ Health check failed: {response.status_code}")
+        except Exception as e:
+            print(f"⚠️ Health check error: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Register service on startup"""
+    print(f"🚀 Starting {SERVICE_NAME} v{SERVICE_VERSION}")
+    print(f"🌐 Service URL: {BASE_URL}")
+    print(f"🎯 Orchestrator URL: {ORCHESTRATOR_URL}")
+    
+    # Register with orchestrator
+    await register_with_orchestrator()
+    
+    # Start periodic health checks
+    asyncio.create_task(periodic_health_check())
+
 @app.get("/")
 async def root():
     return {
@@ -51,22 +127,27 @@ async def root():
 async def health_check():
     health_status = {
         "status": "healthy",
-        "service": "analysis",
-        "version": "1.0.0",
-        "timestamp": "2025-01-02T21:18:00Z"
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "uptime": "running",
+        "endpoints": {
+            "health": "/health",
+            "info": "/info",
+            "analyze": "/analyze",
+            "status": "/status/{job_id}",
+            "results": "/results/{job_id}"
+        },
+        "capabilities": SERVICE_INFO["metadata"]["capabilities"],
+        "supported_formats": SERVICE_INFO["metadata"]["supported_formats"]
     }
-    print(f"🏥 Health check requested - Status: {health_status}")
+    print(f"🏥 Health check requested - Status: {health_status['status']}")
     return health_status
 
 @app.get("/info")
 async def info():
     """Get analysis metadata and requirements - used by orchestrator for discovery"""
-    return {
-        "name": "Analysis Service",
-        "version": "1.0.0",
-        "description": "A simple analysis service that processes 2 CSV files",
-        "input_files": get_input_files("example")
-    }
+    return SERVICE_INFO
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze(
@@ -260,9 +341,10 @@ async def step3_extract_outputs(job_id: str) -> List[Dict[str, Any]]:
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8000))
-    print(f"🚀 Starting Analysis Service on port {port}")
+    print(f"🚀 Starting {SERVICE_NAME} v{SERVICE_VERSION} on port {port}")
     print(f"🏥 Health check endpoint: http://0.0.0.0:{port}/health")
     print(f"📊 Info endpoint: http://0.0.0.0:{port}/info")
+    print(f"🎯 Will register with orchestrator at: {ORCHESTRATOR_URL}")
     uvicorn.run(
         "app:app", 
         host="0.0.0.0", 

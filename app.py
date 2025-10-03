@@ -42,7 +42,7 @@ SERVICE_INFO = {
     "info_endpoint": "/info",
     "version": SERVICE_VERSION,
     "description": "A simple analysis service that processes 2 CSV files",
-    "metadata": {
+    "service_metadata": {
         "input_files": get_input_files("example"),
         "capabilities": ["csv_processing", "data_analysis"],
         "max_file_size": "10MB",
@@ -138,8 +138,8 @@ async def health_check():
             "status": "/status/{job_id}",
             "results": "/results/{job_id}"
         },
-        "capabilities": SERVICE_INFO["metadata"]["capabilities"],
-        "supported_formats": SERVICE_INFO["metadata"]["supported_formats"]
+        "capabilities": SERVICE_INFO["service_metadata"]["capabilities"],
+        "supported_formats": SERVICE_INFO["service_metadata"]["supported_formats"]
     }
     print(f"🏥 Health check requested - Status: {health_status['status']}")
     return health_status

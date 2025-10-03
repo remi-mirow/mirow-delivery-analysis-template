@@ -1,0 +1,23 @@
+# Ignore development files
+.git
+.gitignore
+README.md
+.env
+*.log
+__pycache__
+*.pyc
+.pytest_cache
+.vscode
+.idea
+
+# Ignore test files
+tests/
+test_*
+
+# Ignore documentation
+docs/
+*.md
+
+# Ignore temporary files
+*.tmp
+*.temp

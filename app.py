@@ -28,10 +28,15 @@ from analysis.metadata.outputs import get_output_files, OUTPUTS_DIR
 
 # Environment variables
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
-SERVICE_NAME = os.getenv("SERVICE_NAME", "mirow-delivery-analysis-template")
+SERVICE_NAME = os.getenv("SERVICE_NAME", os.getenv("RAILWAY_SERVICE_NAME", "mirow-delivery-analysis-template"))
 SERVICE_VERSION = os.getenv("SERVICE_VERSION", "1.0.0")
 SERVICE_PORT = int(os.getenv("PORT", 8000))
-BASE_URL = os.getenv("BASE_URL", f"http://localhost:{SERVICE_PORT}")
+
+# Use Railway's private domain for BASE_URL if available, otherwise construct from PORT
+if os.getenv("RAILWAY_PRIVATE_DOMAIN"):
+    BASE_URL = f"https://{os.getenv('RAILWAY_PRIVATE_DOMAIN')}"
+else:
+    BASE_URL = os.getenv("BASE_URL", f"http://localhost:{SERVICE_PORT}")
 
 # Service registration data
 SERVICE_INFO = {

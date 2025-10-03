@@ -4,11 +4,6 @@ File definitions for the analysis.
 Data scientists define their input and output files here.
 """
 
-import os
-
-# Shared volume path from environment
-SHARED_VOLUME_PATH = os.getenv("SHARED_VOLUME_PATH", "/shared-files")
-
 # Input files
 DATA = {
     "type": "input",
@@ -67,17 +62,10 @@ INSIGHTS = {
     "description": "Analysis insights summary"
 }
 
-# Helper function to get file path
-def get_file_path(job_id: str, file_def: dict) -> str:
-    """
-    Get the full path for a file based on job_id and file definition.
-    
-    Args:
-        job_id: Unique job identifier
-        file_def: File definition dictionary
-        
-    Returns:
-        Full file path
-    """
-    filename = file_def["basename"] + file_def["extension"]
-    return f"{SHARED_VOLUME_PATH}/{job_id}/{filename}"
+def get_all_input_files():
+    """Get all input file definitions"""
+    return [DATA, CONFIG, ADDITIONAL_DATA, REFERENCE]
+
+def get_all_output_files():
+    """Get all output file definitions"""
+    return [RESULTS, PROCESSED_DATA, INSIGHTS]

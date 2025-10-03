@@ -11,21 +11,32 @@ A clean, structured template for creating analysis microservices that integrate 
 
 ## Architecture
 
-The template separates concerns into clear areas:
+The template follows a 3-step process:
 
-- `app.py` - Railway infrastructure (don't modify)
-- `files.py` - File definitions (customize this)
-- `parameters.py` - Parameter definitions (customize this)
-- `run.py` - Your analysis logic (implement this)
-- `src/` - Your utility functions and helper files
+1. **Preparation** (handled by `app.py`):
+   - Receives input files via API upload
+   - Receives parameters via API
+   - Stores files in `inputs/{job_id}/` folder
+   - Stores parameters in `inputs/{job_id}/parameters.json`
+
+2. **Execution** (implemented in `run.py`):
+   - Data scientist implements analysis logic
+   - Receives input file paths and parameters as arguments
+   - Saves results to `outputs/{job_id}/` folder
+   - Can use `processing/{job_id}/` for temporary files
+
+3. **Returning** (handled by `app.py`):
+   - Collects output files from `outputs/{job_id}/`
+   - Returns results and file list via API
+   - Provides download endpoints for output files
 
 ## How to Use
 
 1. **Copy this folder** for your new analysis service
 2. **Customize `files.py`** with your file definitions
 3. **Customize `parameters.py`** with your parameter definitions
-4. **Implement `run.py`** with your analysis logic
-5. **Add utility functions** to `src/utils.py` and other helper files in `src/`
+4. **Implement `analysis/run.py`** with your analysis logic
+5. **Add utility functions** to `analysis/src/utils.py` and other helper files in `analysis/src/`
 6. **Add dependencies** to `requirements.txt`
 7. **Deploy to Railway**
 
@@ -96,19 +107,19 @@ DATE_RANGE = {
 }
 ```
 
-### 3. Implement Analysis Logic (`run.py`)
+### 3. Implement Analysis Logic (`analysis/run.py`)
 
 ```python
-from files import DATA, CONFIG, RESULTS, get_file_path
-
-def run_analysis(job_id: str, progress_callback=None) -> Dict[str, Any]:
-    # Load configuration
-    config_path = get_file_path(job_id, CONFIG)
-    config = json.load(open(config_path))
-    
+def run_analysis(
+    input_files: Dict[str, str],
+    parameters: Dict[str, Any],
+    output_files: Dict[str, str],
+    processing_files: Dict[str, str],
+    progress_callback=None
+) -> Dict[str, Any]:
     # Read input data
-    data_path = get_file_path(job_id, DATA)
-    data_df = pd.read_csv(data_path)
+    data_file = input_files.get("data.csv")
+    data_df = pd.read_csv(data_file)
     
     # Your analysis logic here
     results = {
@@ -117,14 +128,14 @@ def run_analysis(job_id: str, progress_callback=None) -> Dict[str, Any]:
         "success_rate": (data_df['status'] == 'delivered').mean() * 100
     }
     
-    # Save results
-    results_path = get_file_path(job_id, RESULTS)
-    json.dump(results, open(results_path, 'w'))
+    # Save results using output file paths
+    results_file = output_files.get("results.json")
+    json.dump(results, open(results_file, 'w'))
     
     return results
 ```
 
-### 4. Add Utility Functions (`src/utils.py`)
+### 4. Add Utility Functions (`analysis/src/utils.py`)
 
 ```python
 # Add your utility functions here
@@ -141,15 +152,15 @@ def generate_insights(metrics):
     return insights
 ```
 
-### 5. Use Utilities in Your Analysis (`run.py`)
+### 5. Use Utilities in Your Analysis (`analysis/run.py`)
 
 ```python
-from src.utils import calculate_metrics, generate_insights
+from analysis.src.utils import calculate_metrics, generate_insights
 
-def run_analysis(job_id: str, progress_callback=None):
+def run_analysis(input_files, parameters, output_files, processing_files, progress_callback=None):
     # Read data
-    data_path = get_file_path(job_id, DATA)
-    data_df = pd.read_csv(data_path)
+    data_file = input_files.get("data.csv")
+    data_df = pd.read_csv(data_file)
     
     # Use your utility functions
     metrics = calculate_metrics(data_df)
@@ -158,26 +169,31 @@ def run_analysis(job_id: str, progress_callback=None):
     # Your analysis logic here
     results = {**metrics, "insights": insights}
     
+    # Save results using output file paths
+    results_file = output_files.get("results.json")
+    json.dump(results, open(results_file, 'w'))
+    
     return results
 ```
 
 ## File I/O Made Simple
 
-All file paths are automatically generated using the shared volume:
+Files are automatically handled by the infrastructure:
 
 ```python
-from files import DATA, CONFIG, RESULTS, get_file_path
-
-# Read input files
-data_path = get_file_path(job_id, DATA)
-data_df = pd.read_csv(data_path)
-
-config_path = get_file_path(job_id, CONFIG)
-config = json.load(open(config_path))
-
-# Save output files
-results_path = get_file_path(job_id, RESULTS)
-json.dump(results, open(results_path, 'w'))
+def run_analysis(input_files, parameters, output_files, processing_files, progress_callback=None):
+    # Read input files
+    data_file = input_files.get("data.csv")
+    data_df = pd.read_csv(data_file)
+    
+    # Access parameters
+    analysis_type = parameters.get("analysis_type")
+    
+    # Save output files
+    results_file = output_files.get("results.json")
+    json.dump(results, open(results_file, 'w'))
+    
+    return results
 ```
 
 ## Environment Configuration
@@ -214,11 +230,12 @@ mirow-delivery-analysis-template/
 ├── app.py                 # Railway infrastructure (don't modify)
 ├── files.py               # File definitions (customize this)
 ├── parameters.py          # Parameter definitions (customize this)
-├── run.py                 # Your analysis logic (implement this)
-├── src/                   # Your utility functions
-│   ├── __init__.py
-│   ├── utils.py          # Add your utility functions here
-│   └── ...               # Add other helper files as needed
+├── analysis/              # Data scientist's workspace
+│   ├── run.py             # Your analysis logic (implement this)
+│   └── src/               # Your utility functions
+│       ├── __init__.py
+│       ├── utils.py       # Add your utility functions here
+│       └── ...            # Add other helper files as needed
 ├── requirements.txt       # Dependencies
 ├── Dockerfile            # Container configuration
 └── README.md             # This file
@@ -226,9 +243,10 @@ mirow-delivery-analysis-template/
 
 ## Benefits
 
-- **Simple structure** - only modify `files.py`, `parameters.py`, `run.py` and `src/` folder
-- **Clean slate** - `src/utils.py` is empty, add your own functions
-- **No Railway complexity** - infrastructure handled automatically
+- **API-based file transfer** - no shared volumes needed
+- **Simple structure** - only modify `files.py`, `parameters.py`, and `analysis/` folder
+- **Clean slate** - `analysis/src/utils.py` is empty, add your own functions
+- **No infrastructure complexity** - file handling done automatically
 - **Clean separation** - focus on analysis logic only
 - **Standard interface** - works with orchestrator out of the box
 - **Easy testing** - local development with simple file paths

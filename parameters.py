@@ -36,3 +36,7 @@ PRIORITY = {
     "description": "Analysis priority level",
     "required": False
 }
+
+def get_all_parameters():
+    """Get all parameter definitions"""
+    return [ANALYSIS_TYPE, DATE_RANGE, REGION, PRIORITY]

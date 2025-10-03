@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import uuid
@@ -7,15 +7,14 @@ import uvicorn
 import json
 import os
 from pathlib import Path
-from run import run_analysis
-from files import SHARED_VOLUME_PATH, DATA, CONFIG, ADDITIONAL_DATA, REFERENCE
-from parameters import ANALYSIS_TYPE, DATE_RANGE, REGION, PRIORITY
+from analysis.run import run_analysis
+from files import get_all_input_files, get_all_output_files
+from parameters import get_all_parameters
 
-# Simple models
+# Models
 class AnalysisRequest(BaseModel):
     job_id: str
-    input_path: str  # Path to shared volume input directory
-    analysis_id: Optional[int] = None
+    parameters: Dict[str, Any]
 
 class AnalysisResponse(BaseModel):
     job_id: str
@@ -52,34 +51,48 @@ async def info():
         "name": "Analysis Service",
         "version": "1.0.0",
         "description": "A sample analysis service",
-        "input_files": [DATA, CONFIG, ADDITIONAL_DATA, REFERENCE],
-        "input_parameters": [ANALYSIS_TYPE, DATE_RANGE, REGION, PRIORITY]
+        "input_files": get_all_input_files(),
+        "input_parameters": get_all_parameters()
     }
 
 @app.post("/analyze", response_model=AnalysisResponse)
-async def analyze(request: AnalysisRequest):
-    job_id = request.job_id
+async def analyze(
+    files: List[UploadFile] = File(...),
+    parameters: str = Form(...)
+):
+    """
+    Start analysis with uploaded files and parameters.
     
-    # Check if input directory exists
-    if not os.path.exists(request.input_path):
-        raise HTTPException(status_code=400, detail="Input directory not found")
+    Args:
+        files: List of uploaded input files
+        parameters: JSON string with analysis parameters
+    """
+    job_id = str(uuid.uuid4())
     
-    # Store job
-    jobs[job_id] = {
-        "status": "pending",
-        "input_path": request.input_path,
-        "progress": 0.0,
-        "message": "Job submitted"
-    }
-    
-    # Start processing
-    asyncio.create_task(process_job(job_id))
-    
-    return AnalysisResponse(
-        job_id=job_id,
-        status="pending", 
-        message="Job submitted"
-    )
+    try:
+        # Parse parameters
+        params = json.loads(parameters)
+        
+        # Store job
+        jobs[job_id] = {
+            "status": "pending",
+            "progress": 0.0,
+            "message": "Job submitted"
+        }
+        
+        # Start processing
+        asyncio.create_task(process_job(job_id, files, params))
+        
+        return AnalysisResponse(
+            job_id=job_id,
+            status="pending", 
+            message="Job submitted"
+        )
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid parameters JSON")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/status/{job_id}", response_model=JobStatus)
 async def get_status(job_id: str):
@@ -96,6 +109,7 @@ async def get_status(job_id: str):
 
 @app.get("/results/{job_id}")
 async def get_results(job_id: str):
+    """Get analysis results and output files"""
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     
@@ -103,7 +117,30 @@ async def get_results(job_id: str):
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail="Job not completed")
     
-    return {"job_id": job_id, "results": job["results"]}
+    # Return results and list of output files
+    return {
+        "job_id": job_id, 
+        "results": job["results"],
+        "output_files": job.get("output_files", [])
+    }
+
+@app.get("/download/{job_id}/{filename}")
+async def download_file(job_id: str, filename: str):
+    """Download an output file"""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = jobs[job_id]
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed")
+    
+    # Get output file path
+    output_path = Path("outputs") / job_id / filename
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    from fastapi.responses import FileResponse
+    return FileResponse(output_path)
 
 @app.delete("/jobs/{job_id}")
 async def cancel_job(job_id: str):
@@ -113,29 +150,81 @@ async def cancel_job(job_id: str):
     jobs[job_id]["status"] = "cancelled"
     return {"message": "Job cancelled"}
 
-async def process_job(job_id: str):
+async def process_job(job_id: str, files: List[UploadFile], parameters: Dict[str, Any]):
     """
-    Process analysis job using the run_analysis function.
+    Process analysis job - handles file preparation and execution.
     
-    This function handles the Railway infrastructure complexity.
+    This function handles the infrastructure complexity.
     Data scientists implement their logic in run_analysis()
     """
     job = jobs[job_id]
     
     try:
         job["status"] = "running"
-        job["message"] = "Analysis started"
+        job["message"] = "Preparing files..."
         
-        # Progress callback function
+        # 1. PREPARATION: Store input files and parameters
+        input_dir = Path("inputs") / job_id
+        output_dir = Path("outputs") / job_id
+        processing_dir = Path("processing") / job_id
+        
+        # Create directories
+        input_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        processing_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Store uploaded files
+        input_files = {}
+        for file in files:
+            file_path = input_dir / file.filename
+            with open(file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+            input_files[file.filename] = str(file_path)
+        
+        # Store parameters
+        params_file = input_dir / "parameters.json"
+        with open(params_file, "w") as f:
+            json.dump(parameters, f, indent=2)
+        
+        job["message"] = "Running analysis..."
+        
+        # 2. EXECUTION: Call data scientist's run function
         def progress_callback(progress: float, message: str):
             job["progress"] = progress
             job["message"] = message
         
-        # Run the analysis
-        results = run_analysis(job_id, progress_callback)
+        # Prepare output and processing file paths
+        output_files = {
+            "results.json": str(output_dir / "results.json"),
+            "processed_data.csv": str(output_dir / "processed_data.csv"),
+            "insights.txt": str(output_dir / "insights.txt")
+        }
+        
+        processing_files = {
+            "temp_data.csv": str(processing_dir / "temp_data.csv"),
+            "temp_results.json": str(processing_dir / "temp_results.json")
+        }
+        
+        # Run the analysis with file paths and parameters
+        results = run_analysis(
+            input_files=input_files,
+            parameters=parameters,
+            output_files=output_files,
+            processing_files=processing_files,
+            progress_callback=progress_callback
+        )
+        
+        # 3. RETURNING: Collect output files
+        output_file_list = []
+        if output_dir.exists():
+            for file_path in output_dir.iterdir():
+                if file_path.is_file():
+                    output_file_list.append(file_path.name)
         
         # Store results
         job["results"] = results
+        job["output_files"] = output_file_list
         job["status"] = "completed"
         job["message"] = "Analysis completed successfully"
         

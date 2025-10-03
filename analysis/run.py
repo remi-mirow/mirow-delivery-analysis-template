@@ -2,21 +2,30 @@
 Main analysis runner - Data scientists implement their analysis logic here.
 
 This is the ONLY file data scientists need to modify.
-All Railway/infrastructure complexity is handled automatically.
+All infrastructure complexity is handled automatically.
 """
 
 import pandas as pd
+import numpy as np
 import json
 from pathlib import Path
 from typing import Dict, Any
-from files import DATA, CONFIG, RESULTS, PROCESSED_DATA, INSIGHTS, get_file_path
 
-def run_analysis(job_id: str, progress_callback=None) -> Dict[str, Any]:
+def run_analysis(
+    input_files: Dict[str, str],
+    parameters: Dict[str, Any],
+    output_files: Dict[str, str],
+    processing_files: Dict[str, str],
+    progress_callback=None
+) -> Dict[str, Any]:
     """
     Main analysis function - IMPLEMENT YOUR ANALYSIS LOGIC HERE.
     
     Args:
-        job_id: Unique job identifier
+        input_files: Dictionary mapping filename to file path
+        parameters: Dictionary with analysis parameters
+        output_files: Dictionary mapping output filename to file path
+        processing_files: Dictionary mapping processing filename to file path
         progress_callback: Optional progress callback function
         
     Returns:
@@ -26,23 +35,27 @@ def run_analysis(job_id: str, progress_callback=None) -> Dict[str, Any]:
     if progress_callback:
         progress_callback(0.1, "Loading data...")
     
-    # Load configuration
-    config_path = get_file_path(job_id, CONFIG)
-    config = {}
-    if Path(config_path).exists():
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-    
     # ========================================
     # YOUR ANALYSIS LOGIC STARTS HERE
     # ========================================
     
     # Example: Read input data
-    data_path = get_file_path(job_id, DATA)
-    data_df = pd.read_csv(data_path)
+    # You can access files by their filename from input_files dict
+    data_file = input_files.get("data.csv")
+    if not data_file:
+        raise ValueError("Required file 'data.csv' not found")
+    
+    data_df = pd.read_csv(data_file)
     
     if progress_callback:
         progress_callback(0.5, "Processing data...")
+    
+    # Example: Simple pandas operations
+    print(f"Data shape: {data_df.shape}")
+    
+    # Example: Get sum of numeric columns (ignoring errors)
+    numeric_sum = data_df.select_dtypes(include=[np.number]).sum(skipna=True)
+    print(f"Numeric columns sum: {numeric_sum}")
     
     # Example: Basic analysis
     total_deliveries = len(data_df)
@@ -71,25 +84,31 @@ def run_analysis(job_id: str, progress_callback=None) -> Dict[str, Any]:
         "cost_savings": 0,
         "efficiency_improvement": 0,
         "insights": insights,
-        "config": config
+        "parameters_used": parameters
     }
     
-    # Save results
-    results_path = get_file_path(job_id, RESULTS)
-    with open(results_path, 'w') as f:
+    # Save results using output file paths
+    # Save results JSON
+    results_file = output_files.get("results.json")
+    with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
     
     # Save processed data
-    processed_path = get_file_path(job_id, PROCESSED_DATA)
-    data_df.to_csv(processed_path, index=False)
+    processed_file = output_files.get("processed_data.csv")
+    data_df.to_csv(processed_file, index=False)
     
     # Save insights
     insights_text = "Analysis Results:\n\n"
+    insights_text += f"Total deliveries: {total_deliveries}\n"
+    insights_text += f"Average delivery time: {avg_delivery_time:.2f} minutes\n"
+    insights_text += f"Success rate: {success_rate:.2f}%\n\n"
+    
+    insights_text += "Insights:\n"
     for insight in insights:
         insights_text += f"• {insight}\n"
     
-    insights_path = get_file_path(job_id, INSIGHTS)
-    with open(insights_path, 'w') as f:
+    insights_file = output_files.get("insights.txt")
+    with open(insights_file, 'w') as f:
         f.write(insights_text)
     
     if progress_callback:

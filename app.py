@@ -1,27 +1,28 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+"""
+Analysis Service - FastAPI web service implementing 3-step workflow:
+
+1. Receive files from orchestrator API and store in inputs folder
+2. Execute run() in analysis 
+3. Extract outputs and return files
+"""
+
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import uuid
 import asyncio
 import uvicorn
-import json
 import os
+import aiofiles
 from pathlib import Path
-try:
-    from analysis.run import run_analysis
-    from analysis.metadata.inputs import get_input_files
-    from analysis.metadata.outputs import get_output_files
-    from main import main as analysis_main
-    print("All imports successful")
-except ImportError as e:
-    print(f"Import error: {e}")
-    raise
+
+# Analysis imports
+from analysis.run import run_analysis
+from analysis.metadata.inputs import get_input_files, INPUTS_DIR
+from analysis.metadata.outputs import get_output_files, OUTPUTS_DIR
 
 # Models
-class AnalysisRequest(BaseModel):
-    job_id: str
-    parameters: Dict[str, Any]
-
 class AnalysisResponse(BaseModel):
     job_id: str
     status: str
@@ -31,7 +32,7 @@ class JobStatus(BaseModel):
     job_id: str
     status: str
     progress: Optional[float] = None
-    results: Optional[Dict[str, Any]] = None
+    output_files: Optional[List[Dict[str, Any]]] = None
 
 # Simple in-memory storage
 jobs = {}
@@ -69,22 +70,17 @@ async def info():
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze(
-    files: List[UploadFile] = File(...),
-    parameters: str = Form(...)
+    files: List[UploadFile] = File(...)
 ):
     """
-    Start analysis with uploaded files and parameters.
+    Start analysis with uploaded files.
     
     Args:
         files: List of uploaded input files
-        parameters: JSON string with analysis parameters
     """
     job_id = str(uuid.uuid4())
     
     try:
-        # Parse parameters
-        params = json.loads(parameters)
-        
         # Store job
         jobs[job_id] = {
             "status": "pending",
@@ -93,7 +89,7 @@ async def analyze(
         }
         
         # Start processing
-        asyncio.create_task(process_job(job_id, files, params))
+        asyncio.create_task(process_job(job_id, files))
         
         return AnalysisResponse(
             job_id=job_id,
@@ -101,8 +97,6 @@ async def analyze(
             message="Job submitted"
         )
         
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid parameters JSON")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -116,7 +110,7 @@ async def get_status(job_id: str):
         job_id=job_id,
         status=job["status"],
         progress=job.get("progress"),
-        results=job.get("results")
+        output_files=job.get("output_files")
     )
 
 @app.get("/results/{job_id}")
@@ -132,7 +126,6 @@ async def get_results(job_id: str):
     # Return results and list of output files
     return {
         "job_id": job_id, 
-        "results": job["results"],
         "output_files": job.get("output_files", [])
     }
 
@@ -147,11 +140,10 @@ async def download_file(job_id: str, filename: str):
         raise HTTPException(status_code=400, detail="Job not completed")
     
     # Get output file path
-    output_path = Path("outputs") / job_id / filename
+    output_path = OUTPUTS_DIR / job_id / filename
     if not output_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     
-    from fastapi.responses import FileResponse
     return FileResponse(output_path)
 
 @app.delete("/jobs/{job_id}")
@@ -162,11 +154,12 @@ async def cancel_job(job_id: str):
     jobs[job_id]["status"] = "cancelled"
     return {"message": "Job cancelled"}
 
-async def process_job(job_id: str, files: List[UploadFile], parameters: Dict[str, Any]):
+async def process_job(job_id: str, files: List[UploadFile]):
     """
-    Process analysis job using the new 3-step workflow.
-    
-    This function now uses the main() orchestrator function.
+    Process analysis job using the 3-step workflow:
+    1. Store input files
+    2. Execute analysis
+    3. Extract outputs
     """
     job = jobs[job_id]
     
@@ -174,25 +167,95 @@ async def process_job(job_id: str, files: List[UploadFile], parameters: Dict[str
         job["status"] = "running"
         job["message"] = "Starting analysis workflow..."
         
-        # Get orchestrator URL from environment
-        orchestrator_url = os.getenv("ORCHESTRATOR_URL", "http://localhost:8001")
+        # Step 1: Store input files
+        await step1_store_files(job_id, files)
         
-        # Use the new main() function for the 3-step workflow
-        result = await analysis_main(orchestrator_url, job_id)
+        # Step 2: Execute analysis
+        await step2_execute_analysis(job_id)
         
-        # Update job status based on result
-        job["status"] = result["status"]
-        job["message"] = result.get("message", "Analysis completed")
+        # Step 3: Extract outputs
+        output_files = await step3_extract_outputs(job_id)
         
-        if result["status"] == "completed":
-            job["output_files"] = result["output_files"]
-        else:
-            job["error"] = result.get("error", "Unknown error")
+        # Update job status
+        job["status"] = "completed"
+        job["message"] = "Analysis completed successfully"
+        job["output_files"] = output_files
         
     except Exception as e:
         job["status"] = "failed"
         job["error"] = str(e)
         job["message"] = f"Analysis failed: {str(e)}"
+
+async def step1_store_files(job_id: str, files: List[UploadFile]):
+    """Step 1: Store uploaded files in inputs folder"""
+    job = jobs[job_id]
+    job["message"] = "Storing input files..."
+    job["progress"] = 0.1
+    
+    # Create job directory
+    job_input_dir = INPUTS_DIR / job_id
+    job_input_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Store files
+    for file in files:
+        file_path = job_input_dir / file.filename
+        async with aiofiles.open(file_path, 'wb') as f:
+            content = await file.read()
+            await f.write(content)
+        print(f"Stored file: {file.filename}")
+    
+    job["progress"] = 0.3
+    job["message"] = "Input files stored"
+
+async def step2_execute_analysis(job_id: str):
+    """Step 2: Execute run() in analysis"""
+    job = jobs[job_id]
+    job["message"] = "Executing analysis..."
+    job["progress"] = 0.3
+    
+    # Progress callback
+    def progress_callback(progress: float, message: str):
+        # Map analysis progress (0-1) to job progress (0.3-0.9)
+        job_progress = 0.3 + (progress * 0.6)
+        job["progress"] = job_progress
+        job["message"] = message
+        print(f"Progress: {job_progress:.1%} - {message}")
+    
+    # Run the analysis
+    status = run_analysis(job_id, progress_callback=progress_callback)
+    
+    if status != "completed":
+        raise Exception(f"Analysis failed with status: {status}")
+    
+    job["progress"] = 0.9
+    job["message"] = "Analysis completed"
+
+async def step3_extract_outputs(job_id: str) -> List[Dict[str, Any]]:
+    """Step 3: Extract output files"""
+    job = jobs[job_id]
+    job["message"] = "Extracting outputs..."
+    job["progress"] = 0.9
+    
+    # Collect output files using metadata
+    output_files = []
+    all_output_metadata = get_output_files(job_id)
+    for file_key, file_info in all_output_metadata.items():
+        file_path = Path(file_info["path"])
+        if file_path.exists():
+            output_files.append({
+                "key": file_key,
+                "filename": file_info["name"],
+                "dtype": file_info["dtype"],
+                "description": file_info["description"],
+                "path": str(file_path),
+                "size": file_path.stat().st_size,
+                "required": file_info.get("required", False)
+            })
+    
+    job["progress"] = 1.0
+    job["message"] = "Outputs extracted"
+    
+    return output_files
 
 if __name__ == "__main__":
     import os

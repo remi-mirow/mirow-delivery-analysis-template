@@ -26,3 +26,6 @@ docs/
 analysis/data/inputs/*/
 analysis/data/outputs/*/
 analysis/data/processed/*/
+
+# Ignore Jupyter notebooks
+notebooks/

@@ -72,53 +72,13 @@ jobs = {}
 
 app = FastAPI(title="Analysis Service")
 
-# Service registration functions
-async def register_with_orchestrator():
-    """Register this service with the orchestrator"""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{ORCHESTRATOR_URL}/api/v1/services/register",
-                json=SERVICE_INFO
-            )
-            if response.status_code == 200:
-                print(f"✅ Successfully registered with orchestrator at {ORCHESTRATOR_URL}")
-                return True
-            else:
-                print(f"⚠️ Failed to register with orchestrator: {response.status_code} - {response.text}")
-                return False
-    except Exception as e:
-        print(f"⚠️ Could not connect to orchestrator at {ORCHESTRATOR_URL}: {str(e)}")
-        return False
-
-async def periodic_health_check():
-    """Periodically update health status with orchestrator"""
-    while True:
-        try:
-            await asyncio.sleep(60)  # Check every minute
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(
-                    f"{ORCHESTRATOR_URL}/api/v1/services/{SERVICE_NAME}/health-check"
-                )
-                if response.status_code == 200:
-                    print("✅ Health check sent to orchestrator")
-                else:
-                    print(f"⚠️ Health check failed: {response.status_code}")
-        except Exception as e:
-            print(f"⚠️ Health check error: {str(e)}")
-
 @app.on_event("startup")
 async def startup_event():
-    """Register service on startup"""
+    """Service startup - orchestrator will discover this service"""
     print(f"🚀 Starting {SERVICE_NAME} v{SERVICE_VERSION}")
     print(f"🌐 Service URL: {BASE_URL}")
     print(f"🎯 Orchestrator URL: {ORCHESTRATOR_URL}")
-    
-    # Register with orchestrator
-    await register_with_orchestrator()
-    
-    # Start periodic health checks
-    asyncio.create_task(periodic_health_check())
+    print(f"📊 Service will be discovered by orchestrator")
 
 @app.get("/")
 async def root():

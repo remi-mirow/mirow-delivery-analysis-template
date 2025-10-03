@@ -46,8 +46,15 @@ async def root():
     }
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy", "timestamp": "2025-01-02T21:17:00Z"}
+async def health_check():
+    health_status = {
+        "status": "healthy",
+        "service": "analysis",
+        "version": "1.0.0",
+        "timestamp": "2025-01-02T21:18:00Z"
+    }
+    print(f"🏥 Health check requested - Status: {health_status}")
+    return health_status
 
 @app.get("/info")
 async def info():
@@ -241,6 +248,13 @@ async def process_job(job_id: str, files: List[UploadFile], parameters: Dict[str
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8000))
-    print(f"Starting server on port {port}")
-    print(f"Health check endpoint: http://0.0.0.0:{port}/health")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    print(f"🚀 Starting Analysis Service on port {port}")
+    print(f"🏥 Health check endpoint: http://0.0.0.0:{port}/health")
+    print(f"📊 Info endpoint: http://0.0.0.0:{port}/info")
+    uvicorn.run(
+        "app:app", 
+        host="0.0.0.0", 
+        port=port, 
+        log_level="info",
+        access_log=True
+    )

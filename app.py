@@ -7,9 +7,14 @@ import uvicorn
 import json
 import os
 from pathlib import Path
-from analysis.run import run_analysis
-from files import get_all_input_files, get_all_output_files
-from parameters import get_all_parameters
+try:
+    from analysis.run import run_analysis
+    from files import get_all_input_files, get_all_output_files
+    from parameters import get_all_parameters
+    print("All imports successful")
+except ImportError as e:
+    print(f"Import error: {e}")
+    raise
 
 # Models
 class AnalysisRequest(BaseModel):
@@ -42,7 +47,7 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "timestamp": "2025-01-02T21:17:00Z"}
 
 @app.get("/info")
 async def info():
@@ -236,4 +241,6 @@ async def process_job(job_id: str, files: List[UploadFile], parameters: Dict[str
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print(f"Starting server on port {port}")
+    print(f"Health check endpoint: http://0.0.0.0:{port}/health")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

@@ -29,3 +29,20 @@ def get_input_files(job_id: str):
             "required": True
         }
     }
+
+def get_input_metadata():
+    """Get input file metadata structure for service discovery (without job-specific paths)"""
+    return {
+        "file1": {
+            "dtype": "csv",
+            "name": "file1.csv",
+            "description": "First CSV input file",
+            "required": True
+        },
+        "file2": {
+            "dtype": "csv",
+            "name": "file2.csv", 
+            "description": "Second CSV input file",
+            "required": True
+        }
+    }

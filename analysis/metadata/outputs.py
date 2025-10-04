@@ -29,3 +29,20 @@ def get_output_files(job_id: str):
             "required": True
         }
     }
+
+def get_output_metadata():
+    """Get output file metadata structure for service discovery (without job-specific paths)"""
+    return {
+        "output1": {
+            "dtype": "xlsx",
+            "name": "output1.xlsx",
+            "description": "First processed file saved as XLSX",
+            "required": True
+        },
+        "output2": {
+            "dtype": "xlsx",
+            "name": "output2.xlsx", 
+            "description": "Second processed file saved as XLSX",
+            "required": True
+        }
+    }

@@ -20,17 +20,36 @@ import aiofiles
 import httpx
 from pathlib import Path
 from datetime import datetime
+import yaml
 
 # Analysis imports
 from analysis.run import run_analysis
-from analysis.metadata.inputs import get_input_files, INPUTS_DIR
-from analysis.metadata.outputs import get_output_files, OUTPUTS_DIR
+from analysis.metadata.inputs import get_input_files, get_input_metadata, INPUTS_DIR
+from analysis.metadata.outputs import get_output_files, get_output_metadata, OUTPUTS_DIR
 
-# Environment variables
-ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
+# Configuration - all configurable via environment variables
 SERVICE_NAME = os.getenv("SERVICE_NAME", os.getenv("RAILWAY_SERVICE_NAME", "mirow-delivery-analysis-template"))
 SERVICE_VERSION = os.getenv("SERVICE_VERSION", "1.0.0")
 SERVICE_PORT = int(os.getenv("PORT", 8000))
+CAPABILITIES = os.getenv("CAPABILITIES", "csv_processing,data_analysis").split(",")
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8001")
+
+def load_analysis_config():
+    """Load analysis configuration from YAML file"""
+    config_path = Path(__file__).parent / "analysis" / "config.yaml"
+    try:
+        with open(config_path, 'r', encoding='utf-8') as file:
+            config = yaml.safe_load(file)
+        return config
+    except FileNotFoundError:
+        print(f"⚠️ Config file not found: {config_path}")
+        return {}
+    except yaml.YAMLError as e:
+        print(f"⚠️ Error parsing YAML config: {e}")
+        return {}
+
+# Load analysis configuration
+ANALYSIS_CONFIG = load_analysis_config()
 
 # Use Railway's private domain for BASE_URL if available, otherwise construct from PORT
 if os.getenv("RAILWAY_PRIVATE_DOMAIN"):
@@ -51,14 +70,14 @@ class ServiceInfoBuilder:
     def input_files(self):
         """Lazy load input files metadata"""
         if self._input_files is None:
-            self._input_files = get_input_files("metadata")
+            self._input_files = get_input_metadata()
         return self._input_files
     
     @property
     def output_files(self):
         """Lazy load output files metadata"""
         if self._output_files is None:
-            self._output_files = get_output_files("metadata")
+            self._output_files = get_output_metadata()
         return self._output_files
     
     @property
@@ -73,25 +92,31 @@ class ServiceInfoBuilder:
         return self._supported_formats
     
     def build_service_info(self):
-        """Build complete service info from metadata"""
+        """Build complete service info from metadata and YAML config"""
         input_count = len(self.input_files)
         output_count = len(self.output_files)
         
+        # Get analysis info from YAML config (now flat structure)
+        analysis_name = ANALYSIS_CONFIG.get("name", SERVICE_NAME)
+        analysis_title = ANALYSIS_CONFIG.get("title", f"Analysis service processing {input_count} input files and generating {output_count} output files")
+        analysis_description = ANALYSIS_CONFIG.get("description", f"Analysis service processing {input_count} input files and generating {output_count} output files")
+        
         return {
-            "service_name": SERVICE_NAME,
+            "service_name": analysis_name,
             "service_type": "analysis",
             "base_url": BASE_URL,
             "health_endpoint": "/health",
             "info_endpoint": "/info",
-            "version": SERVICE_VERSION,
-            "description": f"Analysis service processing {input_count} input files and generating {output_count} output files",
+            "version": ANALYSIS_CONFIG.get("version", SERVICE_VERSION),
+            "title": analysis_title,
+            "description": analysis_description,
+            "client": ANALYSIS_CONFIG.get("client", "Unknown"),
             "service_metadata": {
-                "input_files": self.input_files,
-                "output_files": self.output_files,
-                "capabilities": ["csv_processing", "data_analysis"],
-                "max_file_size": "10MB",
+                "capabilities": CAPABILITIES,
                 "supported_formats": self.supported_formats
-            }
+            },
+            "inputs_metadata": self.input_files,
+            "outputs_metadata": self.output_files
         }
 
 def get_service_info():
@@ -129,8 +154,8 @@ async def startup_event():
 @app.get("/")
 async def root():
     return {
-        "name": "Analysis Service", 
-        "version": "1.0.0", 
+        "name": SERVICE_NAME, 
+        "version": SERVICE_VERSION, 
         "status": "running"
     }
 

@@ -1,0 +1,5 @@
+name: "mirow-delivery-analysis-template"
+title: "CSV Data Analysis"
+description: "A comprehensive analysis service that processes CSV files and generates detailed reports with statistical insights and data visualizations."
+version: "1.0.0"
+client: "Mirow Team"

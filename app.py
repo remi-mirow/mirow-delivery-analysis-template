@@ -38,22 +38,68 @@ if os.getenv("RAILWAY_PRIVATE_DOMAIN"):
 else:
     BASE_URL = os.getenv("BASE_URL", f"http://localhost:{SERVICE_PORT}")
 
-# Service registration data
-SERVICE_INFO = {
-    "service_name": SERVICE_NAME,
-    "service_type": "analysis",
-    "base_url": BASE_URL,
-    "health_endpoint": "/health",
-    "info_endpoint": "/info",
-    "version": SERVICE_VERSION,
-    "description": "A simple analysis service that processes 2 CSV files",
-    "service_metadata": {
-        "input_files": get_input_files("example"),
-        "capabilities": ["csv_processing", "data_analysis"],
-        "max_file_size": "10MB",
-        "supported_formats": ["csv", "xlsx"]
-    }
-}
+# Service registration data - dynamically generated
+class ServiceInfoBuilder:
+    """Builds service info dynamically from metadata in a pythonic way"""
+    
+    def __init__(self):
+        self._input_files = None
+        self._output_files = None
+        self._supported_formats = None
+    
+    @property
+    def input_files(self):
+        """Lazy load input files metadata"""
+        if self._input_files is None:
+            self._input_files = get_input_files("metadata")
+        return self._input_files
+    
+    @property
+    def output_files(self):
+        """Lazy load output files metadata"""
+        if self._output_files is None:
+            self._output_files = get_output_files("metadata")
+        return self._output_files
+    
+    @property
+    def supported_formats(self):
+        """Extract supported formats from input files"""
+        if self._supported_formats is None:
+            formats = set()
+            for file_info in self.input_files.values():
+                if dtype := file_info.get("dtype"):
+                    formats.add(dtype)
+            self._supported_formats = list(formats)
+        return self._supported_formats
+    
+    def build_service_info(self):
+        """Build complete service info from metadata"""
+        input_count = len(self.input_files)
+        output_count = len(self.output_files)
+        
+        return {
+            "service_name": SERVICE_NAME,
+            "service_type": "analysis",
+            "base_url": BASE_URL,
+            "health_endpoint": "/health",
+            "info_endpoint": "/info",
+            "version": SERVICE_VERSION,
+            "description": f"Analysis service processing {input_count} input files and generating {output_count} output files",
+            "service_metadata": {
+                "input_files": self.input_files,
+                "output_files": self.output_files,
+                "capabilities": ["csv_processing", "data_analysis"],
+                "max_file_size": "10MB",
+                "supported_formats": self.supported_formats
+            }
+        }
+
+def get_service_info():
+    """Get service info using the builder"""
+    builder = ServiceInfoBuilder()
+    return builder.build_service_info()
+
+SERVICE_INFO = get_service_info()
 
 # Models
 class AnalysisResponse(BaseModel):

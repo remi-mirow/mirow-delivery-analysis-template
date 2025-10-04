@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script to create Analysis record in orchestrator database.
-This should be run after the analysis service is deployed and registered.
+This dynamically collects metadata from analysis/metadata/ files.
 """
 
 import os
@@ -9,44 +9,98 @@ import sys
 import httpx
 import asyncio
 from datetime import datetime
+from pathlib import Path
 
-# Configuration
+# Add analysis directory to path to import metadata modules
+sys.path.append(os.path.join(os.path.dirname(__file__), 'analysis'))
+
+# Import analysis metadata
+from analysis.metadata.inputs import get_input_files
+from analysis.metadata.outputs import get_output_files
+
+# Configuration - all configurable via environment variables
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "https://mirow-delivery-orchestrator-production.up.railway.app")
 SERVICE_NAME = os.getenv("RAILWAY_SERVICE_NAME", "mirow-delivery-analysis-template")
-SERVICE_VERSION = "1.0.0"
+SERVICE_VERSION = os.getenv("SERVICE_VERSION", "1.0.0")
+MAX_FILE_SIZE = os.getenv("MAX_FILE_SIZE", "10MB")
+CAPABILITIES = os.getenv("CAPABILITIES", "csv_processing,data_analysis").split(",")
+
+class AnalysisMetadataCollector:
+    """Collects and processes analysis metadata in a pythonic way"""
+    
+    def __init__(self, job_id: str = "metadata"):
+        self.job_id = job_id
+        self._input_files = None
+        self._output_files = None
+        self._supported_formats = None
+    
+    @property
+    def input_files(self):
+        """Lazy load input files metadata"""
+        if self._input_files is None:
+            self._input_files = get_input_files(self.job_id)
+        return self._input_files
+    
+    @property
+    def output_files(self):
+        """Lazy load output files metadata"""
+        if self._output_files is None:
+            self._output_files = get_output_files(self.job_id)
+        return self._output_files
+    
+    @property
+    def supported_formats(self):
+        """Extract supported formats from input files"""
+        if self._supported_formats is None:
+            formats = set()
+            for file_info in self.input_files.values():
+                if dtype := file_info.get("dtype"):
+                    formats.add(dtype)
+            self._supported_formats = list(formats)
+        return self._supported_formats
+    
+    def get_input_requirements(self):
+        """Build input requirements from metadata"""
+        return {
+            "supported_formats": self.supported_formats,
+            "max_file_size": MAX_FILE_SIZE,
+            "input_files": self.input_files,
+            "output_files": self.output_files,
+            "capabilities": CAPABILITIES
+        }
+    
+    def get_description(self):
+        """Generate description from metadata"""
+        input_count = len(self.input_files)
+        output_count = len(self.output_files)
+        return f"Analysis service processing {input_count} input files and generating {output_count} output files"
 
 async def create_analysis_record():
-    """Create Analysis record in orchestrator database"""
+    """Create Analysis record in orchestrator database using dynamic metadata"""
+    
+    # Use the pythonic metadata collector
+    metadata_collector = AnalysisMetadataCollector()
     
     analysis_data = {
         "name": SERVICE_NAME,
-        "description": "A simple analysis service that processes 2 CSV files",
+        "description": metadata_collector.get_description(),
         "version": SERVICE_VERSION,
-        "git_repository": "https://github.com/your-org/mirow-delivery-analysis-template",
-        "docker_image": f"mirow-delivery-analysis-template:{SERVICE_VERSION}",
-        "service_port": 8000,
         "is_active": True,
-        "config_schema": {
-            "type": "object",
-            "properties": {
-                "dateRange": {"type": "string", "enum": ["last-7-days", "last-30-days", "last-3-months", "last-year", "custom"]},
-                "region": {"type": "string", "enum": ["all", "north", "south", "east", "west"]},
-                "priority": {"type": "string", "enum": ["normal", "high", "urgent"]}
-            }
-        },
-        "input_requirements": {
-            "required_files": 2,
-            "supported_formats": ["csv", "xlsx"],
-            "max_file_size": "10MB"
-        }
+        "input_requirements": metadata_collector.get_input_requirements()
     }
     
     print(f"🚀 Creating Analysis record for service: {SERVICE_NAME}")
     print(f"🎯 Orchestrator URL: {ORCHESTRATOR_URL}")
+    print(f"📊 Dynamic metadata collected:")
+    print(f"   Supported formats: {metadata_collector.supported_formats}")
+    print(f"   Input files: {list(metadata_collector.input_files.keys())}")
+    print(f"   Output files: {list(metadata_collector.output_files.keys())}")
+    print(f"   Capabilities: {CAPABILITIES}")
+    print(f"   Max file size: {MAX_FILE_SIZE}")
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # First, try to get admin token (you'll need to provide this)
+            # Get admin token from environment
             admin_token = os.getenv("ADMIN_TOKEN")
             if not admin_token:
                 print("❌ ADMIN_TOKEN environment variable is required")
